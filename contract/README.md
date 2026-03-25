@@ -1,22 +1,77 @@
-# Soroban Project
+use stellar_sdk::{
+    client::SyncClient,
+    network::Network,
+    transaction::{Transaction, TransactionEnvelope},
+    assets::{Asset, AssetType},
+    payments::Payment,
+    keypair::Keypair,
+    AccountId,
+    Result,
+};
 
-## Project Structure
+pub struct Invoice {
+    pub id: String,
+    pub amount: u64,
+    pub currency: String,
+    pub payer: AccountId,
+    pub status: String,
+}
 
-This repository uses the recommended structure for a Soroban project:
+impl Invoice {
+    pub fn new(id: String, amount: u64, currency: String, payer: AccountId) -> Self {
+        Invoice {
+            id,
+            amount,
+            currency,
+            payer,
+            status: "Pending".to_string(),
+        }
+    }
 
-```text
-.
-├── contracts
-│   └── hello_world
-│       ├── src
-│       │   ├── lib.rs
-│       │   └── test.rs
-│       └── Cargo.toml
-├── Cargo.toml
-└── README.md
-```
+    pub async fn pay(&self, secret_key: &str, dest_account: AccountId) -> Result<TransactionEnvelope> {
+        let client = SyncClient::new("https://horizon-testnet.stellar.org")?;
+        
+        let keypair = Keypair::from_secret(secret_key)?;
 
-- New Soroban contracts can be put in `contracts`, each in their own directory. There is already a `hello_world` contract in there to get you started.
-- If you initialized this project with any other example contracts via `--with-example`, those contracts will be in the `contracts` directory as well.
-- Contracts should have their own `Cargo.toml` files that rely on the top-level `Cargo.toml` workspace for their dependencies.
-- Frontend libraries can be added to the top-level directory as well. If you initialized this project with a frontend template via `--frontend-template` you will have those files already included.
+        // Load the account from Stellar network
+        let account = client.get_account(&keypair.public_key()).await?;
+
+        // Create a payment operation
+        let payment = Payment::new(
+            &self.payer,
+            &dest_account,
+            &Asset::native(),
+            self.amount,
+        );
+
+        // Create the transaction
+        let tx = Transaction::new(vec![payment], &account, 100);
+
+        // Sign the transaction
+        let tx_envelope = tx.sign(&keypair);
+
+        // Submit the transaction to the network
+        let response = client.submit_transaction(&tx_envelope).await?;
+
+        Ok(response)
+    }
+}
+
+// Sample usage
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_invoice_payment() {
+        let invoice = Invoice::new("inv_001".to_string(), 1000, "XLM".to_string(), "GDUJRZHEUI7UNITYEMXKZHYYK5Z3BTLF6ERFIRETD34AB2N7UGLEFCIE".to_string());
+        let secret_key = "your_secret_key_here"; // Use a valid secret key for testing
+        let dest_account = "GDUJRZHEUI7UNITYEMXKZHYYK5Z3BTLF6ERFIRETD34AB2N7UGLEFCIE".to_string(); // Replace with recipient account
+
+        match invoice.pay(secret_key, dest_account).await {
+            Ok(response) => println!("Transaction successful: {:?}", response),
+            Err(e) => println!("Transaction failed: {:?}", e),
+        }
+    }
+}
+``*
